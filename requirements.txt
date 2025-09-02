@@ -1,0 +1,9 @@
+fastapi[standard]>=0.116.1,<0.117.0
+uvicorn[standard]
+pydantic
+python-dotenv
+passlib[bcrypt]
+python-jose[cryptography]
+dibisoreporting
+pydantic[email]
+python-multipart

@@ -1,0 +1,29 @@
+name: ${COMPOSE_PROJECT_NAME}-api
+
+services:
+  api:
+    container_name: ${COMPOSE_PROJECT_NAME}-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ${USERS_DATABASE_PATH}:/api_data/users.db
+    ports:
+      - ${API_PORT}:8000
+    environment:
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - SECRET_KEY=${SECRET_KEY}
+      - ACCESS_TOKEN_EXPIRE_HOURS=${ACCESS_TOKEN_EXPIRE_HOURS}
+      - LATEX_MAIN_FILE_URL=${LATEX_MAIN_FILE_URL}
+      - LATEX_TEMPLATE_URL=${LATEX_TEMPLATE_URL}
+      - DEFAULT_MAX_ENTITIES=${DEFAULT_MAX_ENTITIES}
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS}
+      - CORS_ALLOW_CREDENTIALS=${CORS_ALLOW_CREDENTIALS}
+      - CORS_ALLOW_METHODS=${CORS_ALLOW_METHODS}
+      - CORS_ALLOW_HEADERS=${CORS_ALLOW_HEADERS}
+      - THREAD_POOL_MAX_WORKERS=${THREAD_POOL_MAX_WORKERS}
+      - API_TITLE=${API_TITLE}
+      - API_VERSION=${API_VERSION}
+      - USERS_DATABASE_PATH=/api_data/users.db # Do not change, change the path in the .env file
+
