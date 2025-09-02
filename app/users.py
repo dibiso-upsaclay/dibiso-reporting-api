@@ -4,8 +4,10 @@ from datetime import datetime
 from typing import Optional, List, Dict
 from pydantic import BaseModel, EmailStr
 
-# Database file path
-DATABASE_PATH = os.getenv("USERS_DATABASE_PATH")
+# Database directory and file name
+USERS_DATABASE_NAME = os.getenv("USERS_DATABASE_NAME")
+USERS_DATABASE_DIRECTORY = os.getenv("USERS_DATABASE_DIRECTORY")
+DATABASE_PATH=os.path.join(USERS_DATABASE_DIRECTORY, USERS_DATABASE_NAME)
 
 # Pydantic models
 class UserCreate(BaseModel):
