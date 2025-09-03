@@ -1,12 +1,9 @@
-#FROM debian:latest
-#
-#RUN apt-get update && apt-get install -y texlive-full && apt-get clean
 FROM texlive/texlive:TL2024-historic
 
 # Install Python, pip and wget
 RUN apt-get update && \
     apt-get install -y python3 python3-pip && \
-    apt-get install -y wget && \
+    apt-get install -y wget fonts-noto-color-emoji && \
      rm -rf /var/lib/apt/lists/*
 
 WORKDIR /code
