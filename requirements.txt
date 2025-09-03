@@ -7,3 +7,4 @@ python-jose[cryptography]
 dibisoreporting
 pydantic[email]
 python-multipart
+starlette

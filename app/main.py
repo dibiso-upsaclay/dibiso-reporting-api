@@ -11,8 +11,9 @@ import asyncio
 import threading
 import time
 import concurrent.futures
+import urllib.parse
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -20,6 +21,8 @@ from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Annotated
+# from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 # Not needed as used in a subprocess script
 # from dibisoreporting import Biso
@@ -202,6 +205,19 @@ app.add_middleware(
     allow_methods=os.getenv("CORS_ALLOW_METHODS", "").split(","),
     allow_headers=os.getenv("CORS_ALLOW_HEADERS", "").split(","),
 )
+
+
+def not_found_error(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Not Found", "doc_url": urllib.parse.urljoin(str(request.base_url), "docs")},
+    )
+
+
+# Register the error handler using the app.exception_handler decorator
+@app.exception_handler(404)
+def not_found_exception_handler(request: Request, exc: HTTPException):
+    return not_found_error(request, exc)
 
 
 # Authentication endpoints
