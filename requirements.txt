@@ -8,3 +8,4 @@ dibisoreporting
 pydantic[email]
 python-multipart
 starlette
+requests

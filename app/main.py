@@ -12,6 +12,7 @@ import threading
 import time
 import concurrent.futures
 import urllib.parse
+import requests
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.responses import FileResponse
@@ -813,6 +814,16 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
     """Run the compilation with improved error handling and early exits"""
     try:
         # Initial status update
+        update_compilation_status(comp_id, 2, "Checking HAL collection ID...")
+
+        # check that the HAL collection ID is valid
+        url = f"https://api.archives-ouvertes.fr/search/?q=collCode_s:{request_data.lab_id}&wt=json&rows=0"
+        coll_exists = requests.get(url).json().get('response',{}).get('numFound', 0) > 0
+        if not coll_exists:
+            logging.info(f"Collection ID {request_data.lab_id} does not exist in HAL. Aborting report generation.")
+            update_compilation_status(comp_id, 0, "The HAL collection ID doesn't exist", "failed")
+            return
+
         update_compilation_status(comp_id, 5, "Starting generation process...")
 
         # Check for cancellation immediately
