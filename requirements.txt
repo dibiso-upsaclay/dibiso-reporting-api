@@ -4,7 +4,7 @@ pydantic
 python-dotenv
 passlib[bcrypt]
 python-jose[cryptography]
-dibisoreporting>=0.2
+dibisoreporting>=0.3
 pydantic[email]
 python-multipart
 starlette
