@@ -31,6 +31,12 @@ from starlette.responses import JSONResponse
 load_dotenv()  # Load environment variables from .env file (only for development; when in docker, there is no env file
 # to load)
 
+scanr_api_password = os.getenv("SCANR_API_PASSWORD")
+scanr_api_url = os.getenv("SCANR_API_URL")
+scanr_api_username = os.getenv("SCANR_API_USERNAME")
+scanr_bso_index = os.getenv("SCANR_BSO_INDEX")
+scanr_publications_index = os.getenv("SCANR_PUBLICATIONS_INDEX")
+
 # Authentication Imports
 from fastapi.security import OAuth2PasswordRequestForm
 from .auth import (
@@ -689,6 +695,11 @@ biso_reporting = Biso(
     max_entities={request_data.max_entities},
     root_path="{project_dir}",
     watermark_text="",
+    scanr_api_password="{scanr_api_password}",
+    scanr_api_url="{scanr_api_url}",
+    scanr_api_username="{scanr_api_username}",
+    scanr_bso_index="{scanr_bso_index}",
+    scanr_publications_index="{scanr_publications_index}",
 )
 biso_reporting.generate_report()
             '''
