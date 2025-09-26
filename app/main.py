@@ -507,13 +507,14 @@ def compile_latex_with_progress(project_folder: Path, comp_id: str, output_name:
     update_compilation_status(comp_id, 80, "Finding main LaTeX file...")
 
     # Find the main .tex file (assuming it's the one with \documentclass)
-    main_tex_file = None
-    for tex_file in project_folder.glob("*.tex"):
-        with open(tex_file, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
-            if '\\documentclass' in content:
-                main_tex_file = tex_file
-                break
+    # main_tex_file = None # temporary fix
+    main_tex_file = "biso-main.tex"
+    # for tex_file in project_folder.glob("*.tex"):
+    #     with open(tex_file, 'r', encoding='utf-8', errors='ignore') as f:
+    #         content = f.read()
+    #         if '\\documentclass' in content:
+    #             main_tex_file = tex_file
+    #             break
 
     if not main_tex_file:
         logger.error("No main LaTeX file found with \\documentclass")
