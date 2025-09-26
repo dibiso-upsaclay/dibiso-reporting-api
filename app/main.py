@@ -612,7 +612,7 @@ def compile_latex_with_progress(project_folder: Path, comp_id: str, output_name:
         update_compilation_status(comp_id, 97, "Finalizing PDF generation...")
 
         # Check if PDF was generated
-        pdf_name = main_tex_file.stem + '.pdf'
+        pdf_name = main_tex_file + '.pdf'
         pdf_path = project_folder / pdf_name
 
         if pdf_path.exists():
