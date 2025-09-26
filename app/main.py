@@ -508,7 +508,7 @@ def compile_latex_with_progress(project_folder: Path, comp_id: str, output_name:
 
     # Find the main .tex file (assuming it's the one with \documentclass)
     # main_tex_file = None # temporary fix
-    main_tex_file = "biso-main.tex"
+    main_tex_file = Path("biso-main.tex")
     # for tex_file in project_folder.glob("*.tex"):
     #     with open(tex_file, 'r', encoding='utf-8', errors='ignore') as f:
     #         content = f.read()
@@ -612,7 +612,7 @@ def compile_latex_with_progress(project_folder: Path, comp_id: str, output_name:
         update_compilation_status(comp_id, 97, "Finalizing PDF generation...")
 
         # Check if PDF was generated
-        pdf_name = main_tex_file + '.pdf'
+        pdf_name = main_tex_file.stem + '.pdf'
         pdf_path = project_folder / pdf_name
 
         if pdf_path.exists():
