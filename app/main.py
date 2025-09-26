@@ -691,6 +691,7 @@ biso_reporting = Biso(
     lab_acronym="{request_data.lab_acronym}",
     lab_full_name="{request_data.lab_name}",
     latex_main_file_url="{os.getenv("LATEX_MAIN_FILE_URL")}",
+    latex_biblio_file_url="{os.getenv("LATEX_BIBLIO_FILE_URL")}",
     latex_template_url="{os.getenv("LATEX_TEMPLATE_URL")}",
     max_entities={request_data.max_entities},
     root_path="{project_dir}",
