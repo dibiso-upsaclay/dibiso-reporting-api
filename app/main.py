@@ -37,6 +37,9 @@ scanr_api_username = os.getenv("SCANR_API_USERNAME")
 scanr_bso_index = os.getenv("SCANR_BSO_INDEX")
 scanr_publications_index = os.getenv("SCANR_PUBLICATIONS_INDEX")
 projects_persistence_time_hours = int(os.getenv("PROJECTS_PERSISTENCE_TIME_HOURS"))
+latex_main_file_url = os.getenv("LATEX_MAIN_FILE_URL")
+latex_biblio_file_url = os.getenv("LATEX_BIBLIO_FILE_URL")
+latex_template_url = os.getenv("LATEX_TEMPLATE_URL")
 
 # Authentication Imports
 from fastapi.security import OAuth2PasswordRequestForm
@@ -536,152 +539,160 @@ async def update_compilation_status_async(comp_id: str, progress: int, step: str
     await loop.run_in_executor(None, update_compilation_status, comp_id, progress, step, status)
 
 
-def compile_latex_with_progress(project_folder: Path, comp_id: str, output_name: str = "document") -> Optional[Path]:
+def run_latex_compile_command(comp_id, project_folder, tex_file, pass_i, process_args):
+    # Start the latex command as a subprocess that can be killed
+    process = subprocess.Popen(
+        process_args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=project_folder
+    )
+
+    # Store the process reference for cancellation
+    with process_lock:
+        latex_compilation_processes[comp_id] = process
+
+    try:
+        # Wait for completion while checking for cancellation
+        while process.poll() is None:  # While process is still running
+            time.sleep(0.25)  # Check every 250ms
+            with compilation_lock:
+                if compilation_status.get(comp_id, {}).get('status') == 'cancelled':
+                    # Kill the lualatex process
+                    try:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                        logger.info(f"Terminated lualatex process for {comp_id}")
+                    except Exception as e:
+                        logger.error(f"Error terminating lualatex process: {e}")
+                    return
+
+        # Get the result
+        stdout, stderr = process.communicate()
+        result_returncode = process.returncode
+
+    finally:
+        # Remove process reference
+        with process_lock:
+            latex_compilation_processes.pop(comp_id, None)
+
+    if result_returncode != 0:
+        logger.error(f"LaTeX compilation of {tex_file} failed (pass {pass_i}):")
+        logger.error(stdout)
+        logger.error(stderr)
+        # Only update status to failed if it's not already cancelled
+        # with compilation_lock:
+        if compilation_status.get(comp_id, {}).get('status') != 'cancelled':
+            update_compilation_status(
+                comp_id,
+                0,
+                f"LaTeX compilation of {tex_file} failed (pass {pass_i})",
+                "failed"
+            )
+        raise RuntimeError(f"LaTeX compilation of {tex_file} failed (pass {pass_i})")
+
+
+def launch_latex_compile_command(comp_id, progress, project_folder, tex_file, pass_i, total_pass, command = "latex"):
+    # Check for cancellation before each pass
+    with compilation_lock:
+        if compilation_status.get(comp_id, {}).get('status') == 'cancelled':
+            return
+
+    if command == "biber":
+        step_name = f"Running Biber for {tex_file}..."
+        process_args = [
+            'biber',
+            '-output-directory', str(project_folder),
+            str(Path(tex_file).stem)
+        ]
+    else:
+        step_name = f"Running LuaTeX on {tex_file} (pass {pass_i}/{total_pass})..."
+        process_args = [
+            'lualatex',
+            '-interaction=nonstopmode',
+            '-output-directory', str(project_folder),
+            str(tex_file)
+        ]
+    update_compilation_status(comp_id, progress, step_name)
+
+    run_latex_compile_command(
+        comp_id = latex_main_file_url,
+        project_folder = project_folder,
+        tex_file = tex_file,
+        pass_i = pass_i,
+        process_args = process_args
+    )
+
+
+def compile_latex_with_progress(project_folder: Path, comp_id: str) -> list[Optional[Path]]:
     """
     Compile LaTeX project in the given folder with progress updates and cancellation support.
     Returns path to generated PDF or None if compilation failed or was cancelled.
     """
-    # Check if cancelled before starting
-    with compilation_lock:
-        if compilation_status.get(comp_id, {}).get('status') == 'cancelled':
-            return None
-
-    update_compilation_status(comp_id, 80, "Finding main LaTeX file...")
-
-    # Find the main .tex file (assuming it's the one with \documentclass)
-    # main_tex_file = None # temporary fix
-    main_tex_file = Path("biso-main.tex")
-    # for tex_file in project_folder.glob("*.tex"):
-    #     with open(tex_file, 'r', encoding='utf-8', errors='ignore') as f:
-    #         content = f.read()
-    #         if '\\documentclass' in content:
-    #             main_tex_file = tex_file
-    #             break
-
-    if not main_tex_file:
-        logger.error("No main LaTeX file found with \\documentclass")
-        # Only update status to failed if it's not already cancelled
-        # with compilation_lock:
-        if compilation_status.get(comp_id, {}).get('status') != 'cancelled':
-            update_compilation_status(comp_id, 0, "Error: No main LaTeX file found", "failed")
-        return None
-
     # Check for cancellation
     with compilation_lock:
         if compilation_status.get(comp_id, {}).get('status') == 'cancelled':
-            return None
+            return [None, None]
 
-    update_compilation_status(comp_id, 82, "Preparing LaTeX compilation...")
+    main_tex_file = Path(os.path.basename(latex_main_file_url))
+    biblio_tex_file = Path(os.path.basename(latex_biblio_file_url))
 
     try:
-        # Run LuaTeX twice to resolve references
-        for i in range(2):
-            # Check for cancellation before each pass
-            with compilation_lock:
-                if compilation_status.get(comp_id, {}).get('status') == 'cancelled':
-                    return None
-
-            step_name = f"Running LuaTeX (pass {i+1}/2)..."
-            progress = 83 + (i * 7)  # 83% first pass, 90% second pass
-
-            update_compilation_status(comp_id, progress, step_name)
-
-            # Start pdflatex as a subprocess that can be killed
-            process = subprocess.Popen([
-                'lualatex',
-                '-interaction=nonstopmode',
-                '-output-directory', str(project_folder),
-                str(main_tex_file)
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=project_folder
-            )
-
-            # Store the process reference for cancellation
-            with process_lock:
-                latex_compilation_processes[comp_id] = process
-
-            try:
-                # Wait for completion while checking for cancellation
-                while process.poll() is None:  # While process is still running
-                    time.sleep(0.25)  # Check every 250ms
-                    with compilation_lock:
-                        if compilation_status.get(comp_id, {}).get('status') == 'cancelled':
-                            # Kill the pdflatex process
-                            try:
-                                process.terminate()
-                                try:
-                                    process.wait(timeout=2)
-                                except subprocess.TimeoutExpired:
-                                    process.kill()
-                                logger.info(f"Terminated pdflatex process for {comp_id}")
-                            except Exception as e:
-                                logger.error(f"Error terminating pdflatex process: {e}")
-                            return None
-
-                # Get the result
-                stdout, stderr = process.communicate()
-                result_returncode = process.returncode
-
-            finally:
-                # Remove process reference
-                with process_lock:
-                    latex_compilation_processes.pop(comp_id, None)
-
-            # Check if cancelled after process completion
-            with compilation_lock:
-                if compilation_status.get(comp_id, {}).get('status') == 'cancelled':
-                    return None
-
-            if result_returncode != 0:
-                logger.error(f"LaTeX compilation failed (run {i+1}):")
-                logger.error(stdout)
-                logger.error(stderr)
-                # Only update status to failed if it's not already cancelled
-                # with compilation_lock:
-                if compilation_status.get(comp_id, {}).get('status') != 'cancelled':
-                    update_compilation_status(comp_id, 0, f"LaTeX compilation failed (pass {i+1})", "failed")
-                if i == 0:  # If first run fails, don't try second run
-                    return None
+        # Run LuaTeX on main tex file twice to resolve references
+        launch_latex_compile_command(comp_id, 73, project_folder, main_tex_file, 1, 3)
+        launch_latex_compile_command(comp_id, 76, project_folder, main_tex_file, 2, 3)
+        launch_latex_compile_command(comp_id, 79, project_folder, main_tex_file, 3, 3)
+        launch_latex_compile_command(comp_id, 82, project_folder, biblio_tex_file, 1, 4)
+        launch_latex_compile_command(comp_id, 85, project_folder, biblio_tex_file, 1, 1, "biber")
+        launch_latex_compile_command(comp_id, 88, project_folder, biblio_tex_file, 2, 4)
+        launch_latex_compile_command(comp_id, 91, project_folder, biblio_tex_file, 3, 4)
+        launch_latex_compile_command(comp_id, 94, project_folder, biblio_tex_file, 4, 4)
 
         # Final check for cancellation
         with compilation_lock:
             if compilation_status.get(comp_id, {}).get('status') == 'cancelled':
-                return None
+                return [None, None]
 
         update_compilation_status(comp_id, 97, "Finalizing PDF generation...")
 
         # Check if PDF was generated
-        pdf_name = main_tex_file.stem + '.pdf'
-        pdf_path = project_folder / pdf_name
+        pdf_names = [main_tex_file.stem + '.pdf', biblio_tex_file.stem + '.pdf']
+        pdf_paths = []
+        for pdf_name in pdf_names:
+            pdf_path = project_folder / pdf_name
 
-        if pdf_path.exists():
-            update_compilation_status(comp_id, 98, "PDF generated successfully!")
-            return pdf_path
-        else:
-            logger.error("PDF file was not generated")
+            if pdf_path.exists():
+                update_compilation_status(comp_id, 98, "PDF generated successfully!")
+                pdf_paths.append(pdf_path)
+            else:
+                logger.error("PDF file was not generated")
+                # Only update status to failed if it's not already cancelled
+                # with compilation_lock:
+                if compilation_status.get(comp_id, {}).get('status') != 'cancelled':
+                    update_compilation_status(comp_id, 0, "Error: PDF file was not generated", "failed")
+                pdf_paths.append(None)
+        return pdf_paths
+
+    except FileNotFoundError:
+        logger.error("lualatex command not found. Please install LaTeX distribution.")
+        # Only update status to failed if it's not already cancelled
+        # with compilation_lock:
+        if compilation_status.get(comp_id, {}).get('status') != 'cancelled':
+            update_compilation_status(comp_id, 0, "Error: lualatex not found", "failed")
+        return [None, None]
+    except Exception as e:
+        # if the error was not previously handled
+        if not("LaTeX compilation of" in str(e) and "failed (pass" in str(e)):
+            logger.error(f"Unexpected error during compilation: {e}")
             # Only update status to failed if it's not already cancelled
             # with compilation_lock:
             if compilation_status.get(comp_id, {}).get('status') != 'cancelled':
-                update_compilation_status(comp_id, 0, "Error: PDF file was not generated", "failed")
-            return None
-
-    except FileNotFoundError:
-        logger.error("pdflatex command not found. Please install LaTeX distribution.")
-        # Only update status to failed if it's not already cancelled
-        # with compilation_lock:
-        if compilation_status.get(comp_id, {}).get('status') != 'cancelled':
-            update_compilation_status(comp_id, 0, "Error: pdflatex not found", "failed")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error during compilation: {e}")
-        # Only update status to failed if it's not already cancelled
-        # with compilation_lock:
-        if compilation_status.get(comp_id, {}).get('status') != 'cancelled':
-            update_compilation_status(comp_id, 0, f"Error: {str(e)}", "failed")
-        return None
+                update_compilation_status(comp_id, 0, f"Error: {str(e)}", "failed")
+        return [None, None]
 
 
 def create_zip_archive(project_folder: Path, zip_path: Path) -> bool:
@@ -733,9 +744,9 @@ biso_reporting = Biso(
     {request_data.year},
     lab_acronym="{request_data.lab_acronym}",
     lab_full_name="{request_data.lab_name}",
-    latex_main_file_url="{os.getenv("LATEX_MAIN_FILE_URL")}",
-    latex_biblio_file_url="{os.getenv("LATEX_BIBLIO_FILE_URL")}",
-    latex_template_url="{os.getenv("LATEX_TEMPLATE_URL")}",
+    latex_main_file_url="{latex_main_file_url}",
+    latex_biblio_file_url="{latex_biblio_file_url}",
+    latex_template_url="{latex_template_url}",
     max_entities={request_data.max_entities},
     root_path="{project_dir}",
     watermark_text="",
@@ -914,9 +925,9 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
 
         # Compile the LaTeX project
         logger.info(f"Compiling LaTeX project in {project_folder} for {comp_id}")
-        pdf_path = compile_latex_with_progress(project_folder, comp_id)
+        pdf_paths = compile_latex_with_progress(project_folder, comp_id)
 
-        if not pdf_path:
+        if None in pdf_paths:
             logger.info(f"LaTeX compilation failed or was cancelled for {comp_id}")
             # Clean up
             cleanup_directories(project_folder, temp_dir)
@@ -943,9 +954,11 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
             return
 
         # Copy PDF to temp directory
-        output_pdf = temp_dir / "document.pdf"
+        report_pdf = temp_dir / "report.pdf"
+        biblio_pdf = temp_dir / "biblio.pdf"
         try:
-            shutil.copy2(pdf_path, output_pdf)
+            shutil.copy2(pdf_paths[0], report_pdf)
+            shutil.copy2(pdf_paths[1], biblio_pdf)
         except Exception as e:
             logger.error(f"Error copying PDF for {comp_id}: {e}")
             # with compilation_lock:
@@ -1033,7 +1046,7 @@ def verify_and_get_file_path(temp_id: str, current_user: dict, filename: str) ->
         )
     
     # Additional security: ensure temp_id doesn't contain path traversal attempts
-    if not temp_id.isalnum() or len(temp_id) < 10:
+    if not temp_id.replace('_', '').replace('-', '').isalnum() or len(temp_id) < 10:
         raise HTTPException(status_code=400, detail="Invalid temporary ID format")
     
     temp_dir = Path(tempfile.gettempdir()) / temp_id
@@ -1225,14 +1238,15 @@ async def cancel_compilation(
 @app.get("/download-pdf")
 async def download_pdf(
     temp_id: str,
+    file_name: str,
     current_user: Annotated[dict, Depends(get_current_active_user)]
 ):
     """Download the generated PDF file. Requires authentication."""
-    pdf_path = verify_and_get_file_path(temp_id, current_user, "document.pdf")
+    pdf_path = verify_and_get_file_path(temp_id, current_user, file_name + ".pdf")
     
     return FileResponse(
         path=pdf_path,
-        filename="document.pdf",
+        filename=file_name,
         media_type="application/pdf"
     )
 
