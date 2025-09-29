@@ -964,6 +964,40 @@ def cleanup_directories(*dirs):
                 logger.error(f"Error cleaning up directory {directory}: {e}")
 
 
+def verify_and_get_file_path(temp_id: str, current_user: dict, filename: str) -> Path:
+    """
+    Verify that the current user owns the file associated with temp_id and return the file path.
+    Returns the file path if valid and exists, raises HTTPException otherwise.
+    """
+    # Find the compilation that generated this file and verify ownership
+    compilation_owner = None
+    with compilation_lock:
+        for comp_id, status in compilation_status.items():
+            if status.get('temp_dir') == str(Path(tempfile.gettempdir()) / temp_id):
+                if status.get('user_id') == current_user["id"]:
+                    compilation_owner = current_user["id"]
+                break
+    
+    if not compilation_owner:
+        raise HTTPException(
+            status_code=403, 
+            detail="Access denied - file not found or you don't own this file"
+        )
+    
+    # Additional security: ensure temp_id doesn't contain path traversal attempts
+    if not temp_id.isalnum() or len(temp_id) < 10:
+        raise HTTPException(status_code=400, detail="Invalid temporary ID format")
+    
+    temp_dir = Path(tempfile.gettempdir()) / temp_id
+    file_path = temp_dir / filename
+    
+    if not file_path.exists():
+        file_type = filename.split('.')[-1].upper()
+        raise HTTPException(status_code=404, detail=f"{file_type} file not found")
+    
+    return file_path
+
+
 async def run_compilation_async(comp_id: str, request_data: ReportRequest):
     """Run the compilation process in the background without blocking the event loop"""
     loop = asyncio.get_event_loop()
@@ -1146,13 +1180,8 @@ async def download_pdf(
     current_user: Annotated[dict, Depends(get_current_active_user)]
 ):
     """Download the generated PDF file. Requires authentication."""
-    # You might want to add additional checks to ensure the user owns this file
-    temp_dir = Path(tempfile.gettempdir()) / temp_id
-    pdf_path = temp_dir / "document.pdf"
-
-    if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail="PDF file not found")
-
+    pdf_path = verify_and_get_file_path(temp_id, current_user, "document.pdf")
+    
     return FileResponse(
         path=pdf_path,
         filename="document.pdf",
@@ -1166,13 +1195,8 @@ async def download_zip(
     current_user: Annotated[dict, Depends(get_current_active_user)]
 ):
     """Download the project ZIP archive. Requires authentication."""
-    # You might want to add additional checks to ensure the user owns this file
-    temp_dir = Path(tempfile.gettempdir()) / temp_id
-    zip_path = temp_dir / "project.zip"
-
-    if not zip_path.exists():
-        raise HTTPException(status_code=404, detail="ZIP file not found")
-
+    zip_path = verify_and_get_file_path(temp_id, current_user, "project.zip")
+    
     return FileResponse(
         path=zip_path,
         filename="latex_project.zip",
