@@ -36,6 +36,7 @@ scanr_api_url = os.getenv("SCANR_API_URL")
 scanr_api_username = os.getenv("SCANR_API_USERNAME")
 scanr_bso_index = os.getenv("SCANR_BSO_INDEX")
 scanr_publications_index = os.getenv("SCANR_PUBLICATIONS_INDEX")
+projects_persistence_time_hours = int(os.getenv("PROJECTS_PERSISTENCE_TIME_HOURS"))
 
 # Authentication Imports
 from fastapi.security import OAuth2PasswordRequestForm
@@ -107,13 +108,12 @@ async def cleanup_old_compilations():
         try:
             await asyncio.sleep(300)  # Check every 5 minutes
             current_time = datetime.now()
-            one_hour_ago = current_time - timedelta(hours=1)
 
             # --- Clean up old compilation statuses in memory ---
             with compilation_lock:
                 to_remove_status = []
                 for comp_id, status in compilation_status.items():
-                    if current_time - status['last_updated'] > timedelta(hours=1):
+                    if current_time - status['last_updated'] > timedelta(hours=projects_persistence_time_hours):
                         to_remove_status.append(comp_id)
 
                 for comp_id in to_remove_status:
@@ -137,7 +137,7 @@ async def cleanup_old_compilations():
                         mod_datetime = datetime.fromtimestamp(mod_timestamp)
 
                         # If the directory was modified more than an hour ago, delete it
-                        if mod_datetime < one_hour_ago:
+                        if mod_datetime < current_time - timedelta(hours=projects_persistence_time_hours):
                             logger.info(f"Deleting old temporary directory: {entry}")
                             shutil.rmtree(entry)
                             cleaned_up_dirs_count += 1
@@ -145,7 +145,9 @@ async def cleanup_old_compilations():
                         logger.error(f"Error cleaning up directory {entry}: {e}")
 
             if cleaned_up_dirs_count > 0:
-                logger.info(f"Cleaned up {cleaned_up_dirs_count} old temporary compilation directories from file system.")
+                logger.info(
+                    f"Cleaned up {cleaned_up_dirs_count} old temporary compilation directories from file system."
+                )
 
         except Exception as e:
             logger.error(f"Error in cleanup task: {e}")
@@ -783,7 +785,9 @@ biso_reporting.generate_report()
             if compilation_status.get(comp_id, {}).get('status') != 'cancelled':
                 error_msg = "Data fetching failed"
                 if "JSONDecodeError" in stderr:
-                    error_msg = "Data fetching failed due to a JSON decode error. This might occur if the server response is empty or malformed. Please check the HAL collection ID or contact your admin."
+                    error_msg = ("Data fetching failed due to a JSON decode error. "
+                                 "This might occur if the server response is empty or malformed. "
+                                 "Please check the HAL collection ID or contact your admin.")
                 elif "ConnectionError" in stderr:
                     error_msg = "Data fetching failed - network connection error"
                 elif "TimeoutError" in stderr:
@@ -934,7 +938,8 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
                     'current_step': 'Compilation completed successfully!',
                     'status': 'completed',
                     'result': {
-                        'message': f'LaTeX report generated successfully for {request_data.lab_acronym} ({request_data.year})',
+                        'message': f'LaTeX report generated successfully for {request_data.lab_acronym} '
+                                   f'({request_data.year})',
                         'pdf_url': '/download-pdf',
                         'zip_url': '/download-zip',
                         'temp_id': temp_dir.name
@@ -943,7 +948,10 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
                     'last_updated': datetime.now()
                 })
             else:
-                logger.warning(f"Compilation {comp_id} not marked as completed because status is {compilation_status[comp_id]['status']}")
+                logger.warning(
+                    f"Compilation {comp_id} not marked as completed because status is "
+                    f"{compilation_status[comp_id]['status']}"
+                )
 
         logger.info(f"LaTeX compilation completed successfully for {comp_id}")
 
