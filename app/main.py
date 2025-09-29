@@ -70,7 +70,8 @@ from .users import (
     activate_user_by_id,
     get_all_users,
     init_database,
-    is_admin
+    is_admin,
+    delete_user_by_id  # Add this import
 )
 
 
@@ -166,7 +167,7 @@ async def monitor_thread_pool():
                 running_count = len([s for s in compilation_status.values() if s['status'] == 'running'])
                 failed_count = len([s for s in compilation_status.values() if s['status'] == 'failed'])
                 completed_count = len([s for s in compilation_status.values() if s['status'] == 'completed'])
-                logger.info(f"Compilation status - Running: {running_count}, Failed: {failed_count}, Completed: {completed_count}")
+            logger.info(f"Compilation status - Running: {running_count}, Failed: {failed_count}, Completed: {completed_count}")
 
         except Exception as e:
             logger.error(f"Error in thread pool monitoring: {e}")
@@ -475,6 +476,45 @@ async def admin_activate_user(
     logger.info(f"Admin {current_admin['username']} activated user {user['username']}")
 
     return {"message": "User activated successfully"}
+
+
+@app.delete("/admin/users/{user_id}")
+async def admin_delete_user(
+    user_id: int,
+    current_admin: Annotated[dict, Depends(get_current_admin_user)]
+):
+    """Permanently delete user (admin only)"""
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Prevent admin from deleting themselves
+    if user_id == current_admin["id"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete your own account"
+        )
+
+    # Check if this is the last active admin
+    if user["role"] == "admin" and user["is_active"]:
+        # Count active admins
+        all_users = get_all_users()
+        active_admin_count = sum(1 for u in all_users if u["role"] == "admin" and u["is_active"] and u["id"] != user_id)
+        
+        if active_admin_count == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete the last active admin user"
+            )
+
+    success = delete_user_by_id(user_id)
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete user")
+
+    logger.info(f"Admin {current_admin['username']} deleted user {user['username']} (ID: {user_id})")
+
+    return {"message": "User deleted successfully"}
 
 
 # Report generation endpoints

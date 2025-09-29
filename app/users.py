@@ -291,6 +291,21 @@ def get_all_users() -> List[Dict]:
 
     return [dict(row) for row in rows]
 
+def delete_user_by_id(user_id: int):
+    """Permanently delete a user by ID (for admin use)"""
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        DELETE FROM users WHERE id = ?
+    ''', (user_id,))
+
+    conn.commit()
+    rows_affected = cursor.rowcount
+    conn.close()
+
+    return rows_affected > 0
+
 def is_admin(user: Dict) -> bool:
     """Check if user has admin role"""
     return user.get("role") == "admin"
