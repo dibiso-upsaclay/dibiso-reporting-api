@@ -579,6 +579,12 @@ def run_latex_compile_command(comp_id, project_folder, tex_file, pass_i, process
         # Remove process reference
         with process_lock:
             latex_compilation_processes.pop(comp_id, None)
+        update_compilation_status(
+            comp_id,
+            0,
+            f"LaTeX compilation of {tex_file} failed ({process_args}) (pass {pass_i})",
+            "failed"
+        )
 
     if result_returncode != 0:
         logger.error(f"LaTeX compilation of {tex_file} failed (pass {pass_i}):")
@@ -931,7 +937,13 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
             logger.info(f"LaTeX compilation failed or was cancelled for {comp_id}")
             # Clean up
             cleanup_directories(project_folder, temp_dir)
-            return  # Status already updated in compile_latex_with_progress
+            update_compilation_status(
+                comp_id,
+                0,
+                f"LaTeX compilation failed",
+                "failed"
+            )
+            return
 
         # Check for cancellation before creating ZIP
         with compilation_lock:
