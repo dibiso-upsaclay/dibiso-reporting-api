@@ -41,6 +41,8 @@ latex_main_file_url = os.getenv("LATEX_MAIN_FILE_URL")
 latex_biblio_file_url = os.getenv("LATEX_BIBLIO_FILE_URL")
 latex_template_url = os.getenv("LATEX_TEMPLATE_URL")
 openalex_analysis_cache_path = os.getenv("OPENALEX_ANALYSIS_CACHE_PATH")
+openalex_api_key = os.getenv("OPENALEX_API_KEY")
+openalex_email = os.getenv("OPENALEX_EMAIL")
 
 # Authentication Imports
 from fastapi.security import OAuth2PasswordRequestForm
@@ -760,6 +762,11 @@ from dibisoreporting import Biso
 
 if "{str(openalex_analysis_cache_path)}" != None:
     openalex_analysis_config.project_data_folder_path = "{str(openalex_analysis_cache_path)}"
+if "{str(openalex_api_key)}" != None:
+    openalex_analysis_config.api_key = "{str(openalex_api_key)}"
+if "{str(openalex_email)}" != None:
+    openalex_analysis_config.project_data_folder_path = "{str(openalex_email)}"
+
 
 biso_reporting = Biso(
     "{request_data.lab_id}",

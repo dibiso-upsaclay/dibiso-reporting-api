@@ -8,6 +8,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ${USERS_DATABASE_DIRECTORY}:/api_data
+      - ${OPENALEX_ANALYSIS_CACHE_PATH}:/openalex_analysis_cache
     ports:
       - ${API_PORT}:8000
     environment:
@@ -35,5 +36,7 @@ services:
       - USERS_DATABASE_NAME=${USERS_DATABASE_NAME}
       - USERS_DATABASE_DIRECTORY=/api_data
 #      - USERS_DATABASE_PATH=/api_data/users.db # Do not change, change the path in the .env file
-      - OPENALEX_ANALYSIS_CACHE_PATH=${OPENALEX_ANALYSIS_CACHE_PATH}
+      - OPENALEX_ANALYSIS_CACHE_PATH=/openalex_analysis_cache
+      - OPENALEX_API_KEY=${OPENALEX_API_KEY}
+      - OPENALEX_EMAIL=${OPENALEX_EMAIL}
 
