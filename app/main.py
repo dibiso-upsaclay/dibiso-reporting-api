@@ -765,7 +765,7 @@ if "{str(openalex_analysis_cache_path)}" != None:
 if "{str(openalex_api_key)}" != None:
     openalex_analysis_config.api_key = "{str(openalex_api_key)}"
 if "{str(openalex_email)}" != None:
-    openalex_analysis_config.project_data_folder_path = "{str(openalex_email)}"
+    openalex_analysis_config.email = "{str(openalex_email)}"
 
 
 biso_reporting = Biso(
