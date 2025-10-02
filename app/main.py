@@ -40,6 +40,7 @@ projects_persistence_time_hours = int(os.getenv("PROJECTS_PERSISTENCE_TIME_HOURS
 latex_main_file_url = os.getenv("LATEX_MAIN_FILE_URL")
 latex_biblio_file_url = os.getenv("LATEX_BIBLIO_FILE_URL")
 latex_template_url = os.getenv("LATEX_TEMPLATE_URL")
+openalex_analysis_cache_path = os.getenv("OPENALEX_ANALYSIS_CACHE_PATH")
 
 # Authentication Imports
 from fastapi.security import OAuth2PasswordRequestForm
@@ -81,6 +82,15 @@ from .users import (
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+if openalex_analysis_cache_path is not None:
+    if not Path(openalex_analysis_cache_path).exists():
+        logger.info(f"Creating OpenAlex analysis cache path: {openalex_analysis_cache_path}")
+        Path(openalex_analysis_cache_path).mkdir(parents=True, exist_ok=True)
+    logger.info(f"Using OpenAlex analysis cache path: {openalex_analysis_cache_path}")
+else:
+    logger.warning(f"OpenAlex analysis cache path not found: {openalex_analysis_cache_path}")
+    logger.warning(f"OpenAlex analysis will use the default cache path: ~/openalex-analysis/data")
 
 # Request model for report generation
 class ReportRequest(BaseModel):
@@ -744,7 +754,13 @@ def your_latex_project_generator(comp_id: str, request_data: ReportRequest) -> O
             f'''
 import sys
 sys.path.insert(0, "{os.getcwd()}")
+
+from openalex_analysis.data import config as openalex_analysis_config
 from dibisoreporting import Biso
+
+if "{str(openalex_analysis_cache_path)}" != None:
+    openalex_analysis_config.project_data_folder_path = "{str(openalex_analysis_cache_path)}"
+
 biso_reporting = Biso(
     "{request_data.lab_id}",
     {request_data.year},
