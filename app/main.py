@@ -209,7 +209,7 @@ async def lifespan(_app: FastAPI):
     monitor_task.cancel()
 
     # Shutdown thread pool
-    thread_pool.shutdown(wait=True, timeout=30)
+    thread_pool.shutdown(wait=True)
 
     # Cancel any running compilations
     with compilation_lock:
@@ -1305,7 +1305,7 @@ async def download_zip(
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy", "message": "BiSO generator API is running"}
+    return {"status": "healthy", "message": "API is running"}
 
 
 if __name__ == "__main__":
