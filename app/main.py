@@ -43,6 +43,7 @@ latex_template_url = os.getenv("LATEX_TEMPLATE_URL")
 openalex_analysis_cache_path = os.getenv("OPENALEX_ANALYSIS_CACHE_PATH")
 openalex_api_key = os.getenv("OPENALEX_API_KEY")
 openalex_email = os.getenv("OPENALEX_EMAIL")
+latex_compile_timeout_seconds = int(os.getenv("LATEX_COMPILE_TIMEOUT_SECONDS", "60"))  # Default 1 minute
 
 # Authentication Imports
 from fastapi.security import OAuth2PasswordRequestForm
@@ -551,7 +552,7 @@ async def update_compilation_status_async(comp_id: str, progress: int, step: str
     await loop.run_in_executor(None, update_compilation_status, comp_id, progress, step, status)
 
 
-def run_latex_compile_command(comp_id, project_folder, tex_file, pass_i, process_args):
+def run_latex_compile_command(comp_id, project_folder, tex_file, pass_i, process_args, timeout_seconds=300):
     # Start the latex command as a subprocess that can be killed
     process = subprocess.Popen(
         process_args,
@@ -565,10 +566,31 @@ def run_latex_compile_command(comp_id, project_folder, tex_file, pass_i, process
     with process_lock:
         latex_compilation_processes[comp_id] = process
 
+    start_time = time.time()
+    timed_out = False
+
     try:
-        # Wait for completion while checking for cancellation
+        # Wait for completion while checking for cancellation and timeout
         while process.poll() is None:  # While process is still running
             time.sleep(0.25)  # Check every 250ms
+
+            # Check for timeout
+            if time.time() - start_time > timeout_seconds:
+                logger.error(f"LaTeX/Biber compilation timeout after {timeout_seconds}s for {comp_id}")
+                timed_out = True
+                try:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                    logger.info(f"Terminated LaTeX/Biber process due to timeout for {comp_id}")
+                except Exception as e:
+                    logger.error(f"Error terminating timed out LaTeX/Biber process: {e}")
+                break
+
+            # Check for cancellation
             with compilation_lock:
                 if compilation_status.get(comp_id, {}).get('status') == 'cancelled':
                     # Kill the lualatex process
@@ -583,38 +605,44 @@ def run_latex_compile_command(comp_id, project_folder, tex_file, pass_i, process
                         logger.error(f"Error terminating lualatex process: {e}")
                     return
 
-        # Get the result
-        stdout, stderr = process.communicate()
-        result_returncode = process.returncode
+        # Get the result (only if process completed or was terminated)
+        if not timed_out:
+            stdout, stderr = process.communicate()
+            result_returncode = process.returncode
+        else:
+            # Process was terminated due to timeout
+            result_returncode = -1
+            stdout = ""
+            stderr = f"Process timeout after {timeout_seconds} seconds"
 
     finally:
         # Remove process reference
         with process_lock:
             latex_compilation_processes.pop(comp_id, None)
-        update_compilation_status(
-            comp_id,
-            0,
-            f"LaTeX compilation of {tex_file} failed ({process_args}) (pass {pass_i})",
-            "failed"
-        )
 
     if result_returncode != 0:
-        logger.error(f"LaTeX compilation of {tex_file} failed (pass {pass_i}):")
-        logger.error(stdout)
-        logger.error(stderr)
+        if timed_out:
+            logger.error(f"LaTeX/Biber compilation of {tex_file} timed out (pass {pass_i})")
+        else:
+            logger.error(f"LaTeX compilation of {tex_file} failed (pass {pass_i}):")
+            logger.error(stdout)
+            logger.error(stderr)
+
         # Only update status to failed if it's not already cancelled
-        # with compilation_lock:
         if compilation_status.get(comp_id, {}).get('status') != 'cancelled':
+            error_msg = f"LaTeX compilation of {tex_file} timed out (pass {pass_i})" if timed_out else f"LaTeX compilation of {tex_file} failed (pass {pass_i})"
             update_compilation_status(
                 comp_id,
                 0,
-                f"LaTeX compilation of {tex_file} failed (pass {pass_i})",
+                error_msg,
                 "failed"
             )
-        raise RuntimeError(f"LaTeX compilation of {tex_file} failed (pass {pass_i})")
+
+        error_detail = f"timeout after {timeout_seconds}s" if timed_out else "compilation error"
+        raise RuntimeError(f"LaTeX compilation of {tex_file} failed (pass {pass_i}): {error_detail}")
 
 
-def launch_latex_compile_command(comp_id, progress, project_folder, tex_file, pass_i, total_pass, command = "latex"):
+def launch_latex_compile_command(comp_id, progress, project_folder, tex_file, pass_i, total_pass, command = "latex", timeout_seconds=300):
     # Check for cancellation before each pass
     with compilation_lock:
         if compilation_status.get(comp_id, {}).get('status') == 'cancelled':
@@ -638,11 +666,12 @@ def launch_latex_compile_command(comp_id, progress, project_folder, tex_file, pa
     update_compilation_status(comp_id, progress, step_name)
 
     run_latex_compile_command(
-        comp_id = latex_main_file_url,
+        comp_id = comp_id,
         project_folder = project_folder,
         tex_file = tex_file,
         pass_i = pass_i,
-        process_args = process_args
+        process_args = process_args,
+        timeout_seconds = timeout_seconds
     )
 
 
@@ -661,14 +690,14 @@ def compile_latex_with_progress(project_folder: Path, comp_id: str) -> list[Opti
 
     try:
         # Run LuaTeX on main tex file twice to resolve references
-        launch_latex_compile_command(comp_id, 73, project_folder, main_tex_file, 1, 3)
-        launch_latex_compile_command(comp_id, 76, project_folder, main_tex_file, 2, 3)
-        launch_latex_compile_command(comp_id, 79, project_folder, main_tex_file, 3, 3)
-        launch_latex_compile_command(comp_id, 82, project_folder, biblio_tex_file, 1, 4)
-        launch_latex_compile_command(comp_id, 85, project_folder, biblio_tex_file, 1, 1, "biber")
-        launch_latex_compile_command(comp_id, 88, project_folder, biblio_tex_file, 2, 4)
-        launch_latex_compile_command(comp_id, 91, project_folder, biblio_tex_file, 3, 4)
-        launch_latex_compile_command(comp_id, 94, project_folder, biblio_tex_file, 4, 4)
+        launch_latex_compile_command(comp_id, 73, project_folder, main_tex_file, 1, 3, timeout_seconds=latex_compile_timeout_seconds)
+        launch_latex_compile_command(comp_id, 76, project_folder, main_tex_file, 2, 3, timeout_seconds=latex_compile_timeout_seconds)
+        launch_latex_compile_command(comp_id, 79, project_folder, main_tex_file, 3, 3, timeout_seconds=latex_compile_timeout_seconds)
+        launch_latex_compile_command(comp_id, 82, project_folder, biblio_tex_file, 1, 4, timeout_seconds=latex_compile_timeout_seconds)
+        launch_latex_compile_command(comp_id, 85, project_folder, biblio_tex_file, 1, 1, "biber", timeout_seconds=latex_compile_timeout_seconds)
+        launch_latex_compile_command(comp_id, 88, project_folder, biblio_tex_file, 2, 4, timeout_seconds=latex_compile_timeout_seconds)
+        launch_latex_compile_command(comp_id, 91, project_folder, biblio_tex_file, 3, 4, timeout_seconds=latex_compile_timeout_seconds)
+        launch_latex_compile_command(comp_id, 94, project_folder, biblio_tex_file, 4, 4, timeout_seconds=latex_compile_timeout_seconds)
 
         # Final check for cancellation
         with compilation_lock:
@@ -794,7 +823,7 @@ biso_reporting.generate_report()
 
         # Wait for completion with timeout and cancellation checks
         start_time = time.time()
-        timeout_seconds = 1800  # 30 minutes
+        timeout_seconds = 300  # 5 minutes
         while process.poll() is None:
             # Check for timeout
             if time.time() - start_time > timeout_seconds:
@@ -1022,7 +1051,7 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
                                        f'({request_data.year})',
                             'pdf_url': '/download-pdf',
                             'zip_url': '/download-zip',
-                            'temp_id': temp_dir.name
+                            'compilation_id': comp_id
                         },
                         'temp_dir': str(temp_dir),
                         'last_updated': datetime.now()
@@ -1038,7 +1067,7 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
                                        f'but PDF compilation failed. You can download the project files.',
                             'pdf_url': None,
                             'zip_url': '/download-zip',
-                            'temp_id': temp_dir.name,
+                            'compilation_id': comp_id,
                             'warning': 'PDF compilation failed or timed out. Download the ZIP to compile locally.'
                         },
                         'temp_dir': str(temp_dir),
@@ -1074,26 +1103,23 @@ def verify_and_get_file_path(temp_id: str, current_user: dict, filename: str) ->
     Verify that the current user owns the file associated with temp_id and return the file path.
     Returns the file path if valid and exists, raises HTTPException otherwise.
     """
-    # Find the compilation that generated this file and verify ownership
+    # temp_id is actually the compilation_id, find the compilation and verify ownership
     compilation_owner = None
+    temp_dir_str = None
     with compilation_lock:
-        for comp_id, status in compilation_status.items():
-            if status.get('temp_dir') == str(Path(tempfile.gettempdir()) / temp_id):
-                if status.get('user_id') == current_user["id"]:
-                    compilation_owner = current_user["id"]
-                break
+        if temp_id in compilation_status:
+            status = compilation_status[temp_id]
+            if status.get('user_id') == current_user["id"]:
+                compilation_owner = current_user["id"]
+                temp_dir_str = status.get('temp_dir')
     
-    if not compilation_owner:
+    if not compilation_owner or not temp_dir_str:
         raise HTTPException(
             status_code=403, 
             detail="Access denied - file not found or you don't own this file"
         )
     
-    # Additional security: ensure temp_id doesn't contain path traversal attempts
-    if not temp_id.replace('_', '').replace('-', '').isalnum() or len(temp_id) < 10:
-        raise HTTPException(status_code=400, detail="Invalid temporary ID format")
-    
-    temp_dir = Path(tempfile.gettempdir()) / temp_id
+    temp_dir = Path(temp_dir_str)
     file_path = temp_dir / filename
     
     if not file_path.exists():
