@@ -956,18 +956,6 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
         logger.info(f"Compiling LaTeX project in {project_folder} for {comp_id}")
         pdf_paths = compile_latex_with_progress(project_folder, comp_id)
 
-        if None in pdf_paths:
-            logger.info(f"LaTeX compilation failed or was cancelled for {comp_id}")
-            # Clean up
-            cleanup_directories(project_folder, temp_dir)
-            update_compilation_status(
-                comp_id,
-                0,
-                f"LaTeX compilation failed",
-                "failed"
-            )
-            return
-
         # Check for cancellation before creating ZIP
         with compilation_lock:
             if compilation_status.get(comp_id, {}).get('status') == 'cancelled':
@@ -977,7 +965,7 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
 
         update_compilation_status(comp_id, 98, "Creating ZIP archive...")
 
-        # Create ZIP archive
+        # Create ZIP archive (always, even if PDF compilation failed)
         zip_path = temp_dir / "project.zip"
         logger.info(f"Creating ZIP archive at {zip_path} for {comp_id}")
 
@@ -988,19 +976,21 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
             cleanup_directories(project_folder, temp_dir)
             return
 
-        # Copy PDF to temp directory
-        report_pdf = temp_dir / "report.pdf"
-        biblio_pdf = temp_dir / "biblio.pdf"
-        try:
-            shutil.copy2(pdf_paths[0], report_pdf)
-            shutil.copy2(pdf_paths[1], biblio_pdf)
-        except Exception as e:
-            logger.error(f"Error copying PDF for {comp_id}: {e}")
-            # with compilation_lock:
-            if compilation_status.get(comp_id, {}).get('status') != 'cancelled':
-                update_compilation_status(comp_id, 0, "Failed to prepare output files", "failed")
-            cleanup_directories(project_folder, temp_dir)
-            return
+        # Check if LaTeX compilation succeeded
+        compilation_successful = None not in pdf_paths
+
+        # Copy PDFs to temp directory if they exist
+        report_pdf = None
+        biblio_pdf = None
+        if compilation_successful:
+            report_pdf = temp_dir / "report.pdf"
+            biblio_pdf = temp_dir / "biblio.pdf"
+            try:
+                shutil.copy2(pdf_paths[0], report_pdf)
+                shutil.copy2(pdf_paths[1], biblio_pdf)
+            except Exception as e:
+                logger.error(f"Error copying PDF for {comp_id}: {e}")
+                compilation_successful = False
 
         # Clean up the original project folder
         try:
@@ -1019,29 +1009,48 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
                         logger.error(f"Error cleaning up temp dir: {e}")
                 return
 
-            # Mark as completed only if still running
+            # Mark as completed or partial success
             if compilation_status.get(comp_id, {}).get('status') == 'running':
-                compilation_status[comp_id].update({
-                    'progress': 100,
-                    'current_step': 'Compilation completed successfully!',
-                    'status': 'completed',
-                    'result': {
-                        'message': f'LaTeX report generated successfully for {request_data.lab_acronym} '
-                                   f'({request_data.year})',
-                        'pdf_url': '/download-pdf',
-                        'zip_url': '/download-zip',
-                        'temp_id': temp_dir.name
-                    },
-                    'temp_dir': str(temp_dir),
-                    'last_updated': datetime.now()
-                })
+                if compilation_successful:
+                    # Full success
+                    compilation_status[comp_id].update({
+                        'progress': 100,
+                        'current_step': 'Compilation completed successfully!',
+                        'status': 'completed',
+                        'result': {
+                            'message': f'LaTeX report generated successfully for {request_data.lab_acronym} '
+                                       f'({request_data.year})',
+                            'pdf_url': '/download-pdf',
+                            'zip_url': '/download-zip',
+                            'temp_id': temp_dir.name
+                        },
+                        'temp_dir': str(temp_dir),
+                        'last_updated': datetime.now()
+                    })
+                else:
+                    # Partial success - data and ZIP available, but PDF compilation failed
+                    compilation_status[comp_id].update({
+                        'progress': 100,
+                        'current_step': 'LaTeX compilation failed, but project files are available',
+                        'status': 'partial',
+                        'result': {
+                            'message': f'Data fetched for {request_data.lab_acronym} ({request_data.year}), '
+                                       f'but PDF compilation failed. You can download the project files.',
+                            'pdf_url': None,
+                            'zip_url': '/download-zip',
+                            'temp_id': temp_dir.name,
+                            'warning': 'PDF compilation failed or timed out. Download the ZIP to compile locally.'
+                        },
+                        'temp_dir': str(temp_dir),
+                        'last_updated': datetime.now()
+                    })
             else:
                 logger.warning(
                     f"Compilation {comp_id} not marked as completed because status is "
                     f"{compilation_status[comp_id]['status']}"
                 )
 
-        logger.info(f"LaTeX compilation completed successfully for {comp_id}")
+        logger.info(f"LaTeX compilation completed for {comp_id} (successful: {compilation_successful})")
 
     except Exception as e:
         logger.error(f"Critical error in background compilation for {comp_id}: {e}")
