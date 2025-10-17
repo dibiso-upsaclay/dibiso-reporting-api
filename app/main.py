@@ -43,7 +43,7 @@ latex_template_url = os.getenv("LATEX_TEMPLATE_URL")
 openalex_analysis_cache_path = os.getenv("OPENALEX_ANALYSIS_CACHE_PATH")
 openalex_api_key = os.getenv("OPENALEX_API_KEY")
 openalex_email = os.getenv("OPENALEX_EMAIL")
-latex_compile_timeout_seconds = int(os.getenv("LATEX_COMPILE_TIMEOUT_SECONDS", "60"))  # Default 1 minute
+latex_compile_timeout_seconds = int(os.getenv("LATEX_COMPILE_TIMEOUT_SECONDS", "180"))  # Default 1 minute
 
 # Authentication Imports
 from fastapi.security import OAuth2PasswordRequestForm
