@@ -98,9 +98,9 @@ else:
 # Request model for report generation
 class ReportRequest(BaseModel):
     year: int = Field(..., ge=1000, le=3000, description="Year for the report")
-    lab_acronym: str = Field(..., min_length=1, description="Laboratory acronym")
-    lab_name: str = Field(..., min_length=1, description="Full laboratory name")
-    lab_id: str = Field(..., min_length=1, description="HAL collection ID")
+    entity_acronym: str = Field(..., min_length=1, description="Laboratory acronym")
+    entity_full_name: str = Field(..., min_length=1, description="Full laboratory name")
+    entity_id: str = Field(..., min_length=1, description="HAL collection ID")
     max_entities:int = Field(..., ge=1, le=10000, description="Max entities to use for maps")
 
 thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=int(os.getenv("THREAD_POOL_MAX_WORKERS")))
@@ -773,10 +773,10 @@ def your_latex_project_generator(comp_id: str, request_data: ReportRequest) -> O
     project_dir = Path(tempfile.mkdtemp(prefix="latex_project_"))
     try:
         logger.info("Starting subprocess for data fetching with parameters:")
-        logger.info(f"  Lab ID: {request_data.lab_id}")
+        logger.info(f"  Entity ID: {request_data.entity_id}")
         logger.info(f"  Year: {request_data.year}")
-        logger.info(f"  Lab Acronym: {request_data.lab_acronym}")
-        logger.info(f"  Lab Name: {request_data.lab_name}")
+        logger.info(f"  Entity Acronym: {request_data.entity_acronym}")
+        logger.info(f"  Entity Full Name: {request_data.entity_full_name}")
         logger.info(f"  Max entities: {request_data.max_entities}")
 
         # Start the data fetching + report generation as a subprocess with dynamic parameters
@@ -798,10 +798,10 @@ if "{str(openalex_email)}" != None:
 
 
 biso_reporting = Biso(
-    "{request_data.lab_id}",
+    "{request_data.entity_id}",
     {request_data.year},
-    lab_acronym="{request_data.lab_acronym}",
-    lab_full_name="{request_data.lab_name}",
+    entity_acronym="{request_data.entity_acronym}",
+    entity_full_name="{request_data.entity_full_name}",
     latex_main_file_url="{latex_main_file_url}",
     latex_biblio_file_url="{latex_biblio_file_url}",
     latex_template_url="{latex_template_url}",
@@ -943,10 +943,10 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
         update_compilation_status(comp_id, 2, "Checking HAL collection ID...")
 
         # check that the HAL collection ID is valid
-        url = f"https://api.archives-ouvertes.fr/search/?q=collCode_s:{request_data.lab_id}&wt=json&rows=0"
+        url = f"https://api.archives-ouvertes.fr/search/?q=collCode_s:{request_data.entity_id}&wt=json&rows=0"
         coll_exists = requests.get(url).json().get('response',{}).get('numFound', 0) > 0
         if not coll_exists:
-            logging.info(f"Collection ID {request_data.lab_id} does not exist in HAL. Aborting report generation.")
+            logging.info(f"Collection ID {request_data.entity_id} does not exist in HAL. Aborting report generation.")
             update_compilation_status(comp_id, 0, "The HAL collection ID doesn't exist", "failed")
             return
 
@@ -1047,7 +1047,7 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
                         'current_step': 'Compilation completed successfully!',
                         'status': 'completed',
                         'result': {
-                            'message': f'LaTeX report generated successfully for {request_data.lab_acronym} '
+                            'message': f'LaTeX report generated successfully for {request_data.entity_acronym} '
                                        f'({request_data.year})',
                             'pdf_url': '/download-pdf',
                             'zip_url': '/download-zip',
@@ -1063,7 +1063,7 @@ def run_compilation(comp_id: str, request_data: ReportRequest):
                         'current_step': 'LaTeX compilation failed, but project files are available',
                         'status': 'partial',
                         'result': {
-                            'message': f'Data fetched for {request_data.lab_acronym} ({request_data.year}), '
+                            'message': f'Data fetched for {request_data.entity_acronym} ({request_data.year}), '
                                        f'but PDF compilation failed. You can download the project files.',
                             'pdf_url': None,
                             'zip_url': '/download-zip',
@@ -1168,13 +1168,13 @@ async def generate_report_endpoint(
     asyncio.create_task(run_compilation_async(comp_id, request))
 
     return {
-        "message": f"Generation started for {request.lab_acronym} ({request.year})",
+        "message": f"Generation started for {request.entity_acronym} ({request.year})",
         "compilation_id": comp_id,
         "parameters": {
             "year": request.year,
-            "lab_acronym": request.lab_acronym,
-            "lab_name": request.lab_name,
-            "lab_id": request.lab_id
+            "entity_acronym": request.entity_acronym,
+            "entity_full_name": request.entity_full_name,
+            "entity_id": request.entity_id
         }
     }
 
